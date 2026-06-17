@@ -1,5 +1,15 @@
 // ═══════════════════════════════════════════════════════════════
 // CHRONICLER — the "direct" verb of the suite
+// v0.4.0 — PHASE 2a+2c: + genre TEMPLATES (Horror / Romance / Hero's Journey)
+// and a save/load LIBRARY scoped per-character or global. Empty chats fill in
+// seconds from a template instead of being authored from scratch.
+//
+// v0.3.0 — PHASE 1.5: + modes (off / world / character) and a SAFE IDLE
+// default. A fresh chat has NO ladder and does nothing until you load one, so
+// Chronicler can never fight a story it wasn't authored for. World mode injects
+// the phase mandate; character mode drives the character's era via the Codex
+// flip and injects nothing; off pauses without clearing the ladder.
+//
 // v0.2.0 — PHASE 1: + the walker.
 //
 // Phase 0 gave us the spine: an ordered ladder of world-phase rungs and a
@@ -46,7 +56,7 @@ const EXT_ID = 'chronicler';
 const TAG = '[Chronicler]';
 const INJECT_KEY = 'CHRONICLER';
 const Z = 31000;
-const VERSION = '0.2.0';
+const VERSION = '0.4.0';
 
 // ─────────────────────────────────────────────────────────────────
 // Default ladder — demo zombie escalation. Each rung is the World-Forge
@@ -109,6 +119,65 @@ const DEMO_LADDER = [
 ];
 
 // ─────────────────────────────────────────────────────────────────
+// GENRE TEMPLATES — pre-authored ladders so a fresh chat is filled in
+// seconds, not authored from scratch. Beats are ARCHETYPAL (generic but
+// walker-judgeable) so they fit any story in the genre; story-specific
+// tweaks are the customization layer on top (edit JSON, or regenerate).
+// Each: { name, mode, ladder }. Plot beat sheets default to world mode.
+// ─────────────────────────────────────────────────────────────────
+
+const TEMPLATES = {
+    zombie: { name: 'Zombie outbreak (demo)', mode: 'world', ladder: DEMO_LADDER },
+
+    horror: {
+        name: 'Horror beat sheet', mode: 'world', ladder: [
+            { title: 'Ordinary Surface', genre: 'unsettling normalcy', situation: 'The world looks normal, but something is quietly wrong.', mandate: ['Keep it domestic and grounded, with one hairline crack.', 'Plant a hint of the threat that no one quite clocks.'], exit: 'An unsettling detail, absence, or rumor surfaces that cannot be fully explained away.' },
+            { title: 'The Crack Widens', genre: 'creeping dread', situation: 'Characters and their inner fault lines are drawn; unease grows.', mandate: ['Deepen the people and their internal conflict.', 'Let the wrongness recur and resist tidy explanation.'], exit: 'The characters become isolated, or are drawn toward the source of the wrongness.' },
+            { title: 'No Turning Back', genre: 'mounting dread', situation: 'A warning is ignored or a threshold crossed; retreat closes off.', mandate: ['Foreclose the easy exit.', 'Tighten dread; make the air feel wrong.'], exit: 'The threat is directly encountered or witnessed first-hand for the first time.' },
+            { title: 'First Encounter', genre: 'survival horror', situation: 'The threat is real and seen. Denial ends.', mandate: ['Render it grounded and frightening, never spectacular.', 'Snap disbelief into adrenaline.'], exit: 'Someone dies or is seriously harmed, or the threat proves it means them.' },
+            { title: 'Shit Gets Real', genre: 'survival horror, bloody', situation: 'First death or undeniable danger. The stakes are blood now.', mandate: ['Let consequences land hard.', 'Evaporate any sense of safety.'], exit: 'The characters are actively hunted, besieged, or trapped.' },
+            { title: 'The Hunt', genre: 'relentless pursuit', situation: 'The threat pursues; they run, hide, scheme.', mandate: ['Keep the pressure relentless.', 'Make every refuge temporary.'], exit: 'They attempt to confront or stop the threat — and fail.' },
+            { title: 'Failed Confrontation', genre: 'despair', situation: 'They try to beat it and cannot. The plan was wrong.', mandate: ['Make the failure cost something real.', 'Let hope curdle.'], exit: 'All seems lost — internal and external collapse arrive together.' },
+            { title: 'The Darkest Hour', genre: 'rock bottom', situation: 'The threat and the inner wound are exposed together.', mandate: ['Strip away comfort.', 'Surface the true nature of both the monster and the flaw.'], exit: 'A new, costlier understanding or plan emerges from the despair.' },
+            { title: 'The True Cost', genre: 'grim resolve', situation: 'A different plan forms; what it demands becomes clear.', mandate: ['Make the price explicit and painful.', 'Let sacrifice loom.'], exit: 'Sacrifices are made (or refused) in a final reckoning with the threat.' },
+            { title: 'The Reckoning', genre: 'climactic horror', situation: 'Final stand. The cost is paid or refused.', mandate: ['Pay the cost on-screen.', 'Resolve the inner conflict through the outer one.'], exit: 'The immediate threat is ended or escaped, at a price.' },
+            { title: 'Only Delayed', genre: 'bleak aftermath', situation: 'The fallout. It is over — but not really.', mandate: ['Show consequences and scars.', 'Leave one ember unextinguished.'], exit: '' },
+        ],
+    },
+
+    romance: {
+        name: 'Romance plot beats', mode: 'world', ladder: [
+            { title: 'Opening', genre: 'grounded, wistful', situation: "Ordinary life before love; the lead's want and wound are shown.", mandate: ['Establish who they are and what is missing.', 'No love-interest pressure yet.'], exit: 'The two leads meet or collide for the first time.' },
+            { title: 'Meet', genre: 'charged', situation: 'First contact. Spark or friction — never neutral.', mandate: ['Charge the first meeting.', 'Let attraction or antagonism crackle.'], exit: 'Circumstances force the two together despite resistance.' },
+            { title: 'Forced Together', genre: 'tense attraction', situation: 'Thrown into proximity; both resist the pull.', mandate: ['Keep them circling.', 'Resistance on the surface, heat underneath.'], exit: 'Resistance wanes; genuine warmth slips through.' },
+            { title: 'The Thaw', genre: 'tender', situation: 'Defenses lower; attraction becomes undeniable.', mandate: ['Let small intimacies land.', 'Let vulnerability peek out.'], exit: 'One or both privately admit, to themselves, that they want this.' },
+            { title: 'Desire', genre: 'yearning, hopeful', situation: 'Want is named inwardly; they picture a future.', mandate: ['Let longing and tenderness rise.', 'Let them hope.'], exit: 'A first real setback or fear threatens the bond.' },
+            { title: 'Happiness Within Reach', genre: 'warm, fragile', situation: 'The relationship blooms; it could actually work.', mandate: ['Make the joy real and earned.', 'Raise what there is to lose.'], exit: 'A deeper fear or external blow shatters the moment.' },
+            { title: 'The Black Moment', genre: 'heartbreak', situation: 'Everything falls apart; the bond seems broken.', mandate: ['Make the rupture cut to the core wound.', 'No easy comfort.'], exit: 'In the aftermath, one lead is forced to confront their own flaw.' },
+            { title: 'Epiphany', genre: 'raw clarity', situation: 'The wound is faced; what love requires becomes clear.', mandate: ['Let the internal change land.', 'Replace fear with understanding.'], exit: 'A decisive act is taken to win the other back.' },
+            { title: 'Grand Gesture', genre: 'vulnerable, earnest', situation: 'A risk is taken to repair what broke.', mandate: ['Put cost and sincerity on display.', 'Expose vulnerability fully.'], exit: 'The two reconcile and commit.' },
+            { title: 'Happily Ever After', genre: 'warm resolution', situation: 'Love affirmed; a glimpse of the life ahead.', mandate: ['Let it breathe.', "Pay off the opening's lack."], exit: '' },
+        ],
+    },
+
+    hero: {
+        name: "Hero's journey (archplot)", mode: 'world', ladder: [
+            { title: 'Ordinary World', genre: 'grounded setup', situation: "The hero's normal life, before the call. Limited awareness.", mandate: ['Ground the status quo.', 'Show the lack the journey will answer.'], exit: 'An event or summons disrupts the ordinary world.' },
+            { title: 'Call to Adventure', genre: 'inciting', situation: 'The inciting incident; a problem or invitation arrives.', mandate: ['Present the call clearly.', 'Let its weight register.'], exit: 'The hero hesitates, refuses, or fears the call.' },
+            { title: 'Refusal & Mentor', genre: 'reluctant', situation: 'Reluctance; guidance or hard resolve is found.', mandate: ['Honor the fear.', 'Let mentorship or necessity tip the balance.'], exit: 'The hero commits and crosses into the unfamiliar.' },
+            { title: 'Crossing the Threshold', genre: 'adventure begins', situation: 'Point of no return; the special world begins.', mandate: ['Mark the shift in rules and tone.', 'Commit the hero.'], exit: 'The hero faces early tests and meets allies and enemies.' },
+            { title: 'Tests, Allies, Enemies', genre: 'rising action', situation: 'Trials of the new world; bonds and rivals form.', mandate: ['Build competence and relationships through obstacles.', 'Keep momentum rising.'], exit: 'A major midpoint shift jumps the stakes or understanding.' },
+            { title: 'Midpoint', genre: 'turning point', situation: 'A pivotal turn; false victory or revelation raises the stakes.', mandate: ['Change the game.', 'Commit the hero fully to the journey.'], exit: 'The hero approaches the central ordeal; the antagonist closes in.' },
+            { title: 'Approach the Cave', genre: 'tightening dread', situation: 'Preparing for the hardest trial; the bad guys close in.', mandate: ['Tighten dread and stakes.', 'Let complications mount.'], exit: 'The hero enters the ordeal — the crisis or darkest moment.' },
+            { title: 'The Ordeal', genre: 'crisis', situation: 'The central crisis; death, loss, or the abyss.', mandate: ['Make the stakes mortal.', 'Let the old self die here.'], exit: 'The hero seizes the prize or a hard-won truth.' },
+            { title: 'Seizing the Sword', genre: 'hard-won', situation: 'The reward; transformation through the ordeal.', mandate: ['Let the victory cost something.', 'Let it change the hero.'], exit: 'A final push or pursuit drives toward the climax.' },
+            { title: 'The Final Push', genre: 'climactic', situation: 'The road back; a last confrontation or sprint.', mandate: ['Pay off the arc.', 'Let the changed hero act decisively.'], exit: 'The conflict resolves and the hero turns toward home.' },
+            { title: 'Return with the Elixir', genre: 'resolution', situation: 'Resolution; a new normal carrying what was won.', mandate: ['Show the transformed status quo.', 'Pay off the ordinary world.'], exit: '' },
+        ],
+    },
+};
+
+// ─────────────────────────────────────────────────────────────────
 // Settings (global) + per-chat state
 // ─────────────────────────────────────────────────────────────────
 
@@ -141,12 +210,15 @@ function saveSettings() { saveSettingsDebounced(); }
 function chatState() {
     const m = chatMeta();
     if (!m[EXT_ID] || typeof m[EXT_ID] !== 'object') {
-        m[EXT_ID] = { pointer: 0, ladder: deepCopy(DEMO_LADDER) };
+        // SAFE IDLE DEFAULT: no ladder. Chronicler does nothing until you load one,
+        // so it can never fight a story it wasn't authored for.
+        m[EXT_ID] = { pointer: 0, ladder: [], mode: 'world' };
     }
     const cs = m[EXT_ID];
-    if (!Array.isArray(cs.ladder) || !cs.ladder.length) cs.ladder = deepCopy(DEMO_LADDER);
+    if (!Array.isArray(cs.ladder)) cs.ladder = [];
     if (typeof cs.pointer !== 'number') cs.pointer = 0;
-    cs.pointer = clampPointer(cs.pointer, cs.ladder.length);
+    cs.pointer = clampPointer(cs.pointer, cs.ladder.length || 1);
+    if (cs.mode !== 'world' && cs.mode !== 'character' && cs.mode !== 'off') cs.mode = 'world';
     if (!cs._walker || typeof cs._walker !== 'object') cs._walker = { lastEvalAt: -999, last: null };
     return cs;
 }
@@ -164,6 +236,120 @@ function activeRung() {
     return cs.ladder[cs.pointer] || null;
 }
 function rungLine(cs) { return `${cs.pointer + 1} / ${cs.ladder.length}`; }
+
+function ladderEmpty() { return !chatState().ladder.length; }
+function getMode() { return chatState().mode; }
+function setMode(m) {
+    if (m !== 'world' && m !== 'character' && m !== 'off') return;
+    chatState().mode = m;
+    saveChatState();
+    refreshPanel();
+    applyInjection(); // a mode change can flip whether we inject
+}
+function loadDemo() {
+    const cs = chatState();
+    cs.ladder = deepCopy(DEMO_LADDER);
+    cs.pointer = 0;
+    cs.mode = 'world';
+    cs._walker = { lastEvalAt: -999, last: null };
+    saveChatState();
+    refreshPanel();
+    applyInjection();
+}
+function clearLadder() {
+    const cs = chatState();
+    cs.ladder = [];
+    cs.pointer = 0;
+    cs._walker = { lastEvalAt: -999, last: null };
+    saveChatState();
+    clearInjection();
+    refreshPanel();
+}
+
+// ── Templates + saved library (2a / 2c) ──
+// Active ladder lives per-chat (chatMetadata). The library lets you SAVE a
+// ladder and reload it elsewhere — scoped to a character (travels with them =
+// character mode) or global (everywhere). Library is stored in global settings.
+
+function currentCharKey() {
+    const c = ctx();
+    try {
+        if (c.groupId) return 'group:' + c.groupId;
+        const id = (c.characterId !== undefined && c.characterId !== null) ? c.characterId : c.this_chid;
+        const char = c.characters?.[id];
+        if (char) return 'char:' + (char.avatar || char.name || String(id));
+    } catch (_) { /* */ }
+    return 'char:' + (c.name2 || 'unknown');
+}
+
+function getLibrary() {
+    const s = settings();
+    if (!Array.isArray(s.library)) s.library = [];
+    return s.library;
+}
+
+function applyLadderInto(ladder, mode) {
+    const cs = chatState();
+    cs.ladder = deepCopy(ladder);
+    cs.pointer = 0;
+    cs.mode = (mode === 'character' || mode === 'world' || mode === 'off') ? mode : 'world';
+    cs._walker = { lastEvalAt: -999, last: null };
+    saveChatState();
+    refreshPanel();
+    applyInjection();
+}
+
+function loadTemplate(key) {
+    const t = TEMPLATES[key];
+    if (!t) return false;
+    applyLadderInto(t.ladder, t.mode);
+    return true;
+}
+function loadSaved(id) {
+    const e = getLibrary().find(x => x.id === id);
+    if (!e) return false;
+    applyLadderInto(e.ladder, e.mode);
+    return true;
+}
+function saveCurrent(name, scope) {
+    const cs = chatState();
+    if (!cs.ladder.length) return { ok: false, error: 'No ladder to save.' };
+    const entry = {
+        id: 'lib_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        name: String(name || '').trim() || ('Ladder ' + new Date().toLocaleDateString()),
+        scope: scope === 'character' ? 'character' : 'global',
+        charKey: scope === 'character' ? currentCharKey() : null,
+        mode: cs.mode,
+        ladder: deepCopy(cs.ladder),
+    };
+    getLibrary().push(entry);
+    saveSettings();
+    refreshPanel();
+    return { ok: true, entry };
+}
+function deleteSaved(id) {
+    const lib = getLibrary();
+    const i = lib.findIndex(x => x.id === id);
+    if (i === -1) return false;
+    lib.splice(i, 1);
+    saveSettings();
+    refreshPanel();
+    return true;
+}
+function libraryForPicker() {
+    const key = currentCharKey();
+    return getLibrary().filter(e => e.scope === 'global' || (e.scope === 'character' && e.charKey === key));
+}
+function pickerOptionsHtml() {
+    const tpl = Object.keys(TEMPLATES)
+        .map(k => `<option value="tpl:${k}">Template · ${esc(TEMPLATES[k].name)}</option>`).join('');
+    const lib = libraryForPicker();
+    const saved = lib.length
+        ? `<option disabled>──── saved ────</option>` +
+          lib.map(e => `<option value="lib:${e.id}">${esc(e.name)}${e.scope === 'character' ? ' · char' : ' · global'}</option>`).join('')
+        : '';
+    return `<option value="">— pick a ladder —</option>${tpl}${saved}`;
+}
 
 // Move the pointer. dir = +1 advance, -1 retreat. opts.silent skips the toast
 // (the walker shows its own richer one). Returns the new rung or null at an end.
@@ -238,7 +424,10 @@ function buildPhaseBlock() {
     return lines.join('\n');
 }
 function applyInjection() {
-    if (!settings().enabled) { clearInjection(); return; }
+    // Only WORLD mode injects a phase mandate. Character mode drives the Codex
+    // era flip instead (no world injection); off mode and an empty ladder inject
+    // nothing — so Chronicler stays silent until it's pointed at a story.
+    if (!settings().enabled || getMode() !== 'world' || ladderEmpty()) { clearInjection(); return; }
     const block = buildPhaseBlock();
     if (!block) { clearInjection(); return; }
     stSetExtensionPrompt(INJECT_KEY, block, PROMPT_IN_CHAT, settings().injectionDepth, false, ROLE_SYSTEM);
@@ -335,6 +524,7 @@ async function runWalker(mesId, force = false) {
     if (walkerInFlight) return;
 
     const cs = chatState();
+    if (cs.mode === 'off' || !cs.ladder.length) return; // paused or idle
     const rung = cs.ladder[cs.pointer];
     // terminal rung or no exit trigger → nothing to judge
     if (!rung || !rung.exit || cs.pointer >= cs.ladder.length - 1) return;
@@ -394,6 +584,7 @@ const ROW = 'display:flex;align-items:center;justify-content:space-between;gap:8
 const BTN = 'background:#222c40;color:#e6ecf5;border:1px solid rgba(150,170,210,0.35);border-radius:6px;padding:5px 10px;font-size:13px;cursor:pointer;';
 const TA = 'width:100%;box-sizing:border-box;background:#141926;color:#cfd8e8;border:1px solid rgba(150,170,210,0.3);border-radius:6px;padding:6px;font-size:11px;font-family:monospace;min-height:90px;';
 const NUM = 'background:#141926;color:#e6ecf5;border:1px solid rgba(150,170,210,0.3);border-radius:6px;padding:3px 6px;font-size:12px;width:70px;';
+const SEL = 'background:#141926;color:#e6ecf5;border:1px solid rgba(150,170,210,0.3);border-radius:6px;padding:3px 6px;font-size:12px;';
 const TXT = 'background:#141926;color:#e6ecf5;border:1px solid rgba(150,170,210,0.3);border-radius:6px;padding:3px 6px;font-size:12px;width:120px;';
 
 const FAB_W = 40, FAB_H = 40, PAD = 5;
@@ -493,26 +684,66 @@ function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+function modeBtn(cs, value, label) {
+    const on = cs.mode === value;
+    const sel = on ? 'background:#3a4a6a;border-color:rgba(190,150,90,0.85);font-weight:bold;' : '';
+    return `<button class="chron-mode-btn" data-mode="${value}" style="${BTN}flex:1;font-size:11px;padding:4px 6px;${sel}">${label}</button>`;
+}
+
 function panelHtml() {
     const s = settings();
     const cs = chatState();
+    const empty = !cs.ladder.length;
     const r = cs.ladder[cs.pointer] || {};
     const atStart = cs.pointer <= 0;
     const atEnd = cs.pointer >= cs.ladder.length - 1;
     const mandate = (r.mandate || []).map(m => `<li style="margin:2px 0;">${esc(m)}</li>`).join('');
     const last = cs._walker?.last ? esc(cs._walker.last) : '—';
-    return `
-    <div id="chronicler-panel" style="${PANEL_STYLE}">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-            <b style="font-size:14px;">📖 Chronicler</b>
-            <span id="chron-close" style="cursor:pointer;opacity:0.7;padding:2px 6px;">✕</span>
-        </div>
 
-        <div style="${ROW}">
-            <span>Enabled</span>
-            <input type="checkbox" id="chron-enabled" ${s.enabled ? 'checked' : ''}>
-        </div>
+    const modeHint = cs.mode === 'world'
+        ? 'World — injects the mandate each turn.'
+        : cs.mode === 'character'
+            ? "Character — drives the character's Codex era (needs the patched bridge + matching Codex states); injects nothing."
+            : 'Off — paused. Injects nothing, walker idle. Ladder kept.';
 
+    const modeRow = `
+        <div style="display:flex;gap:6px;margin:8px 0 2px;">
+            ${modeBtn(cs, 'off', 'Off')}
+            ${modeBtn(cs, 'world', 'World')}
+            ${modeBtn(cs, 'character', 'Character')}
+        </div>
+        <div style="opacity:0.55;font-size:10px;margin:0 0 6px;">${modeHint}</div>`;
+
+    const libSection = `
+        <div style="border-top:1px solid rgba(150,170,210,0.2);margin-top:6px;padding-top:6px;">
+            <div style="font-size:11px;opacity:0.8;margin-bottom:4px;">📚 Load a ladder</div>
+            <div style="display:flex;gap:6px;">
+                <select id="chron-lib-select" style="${SEL}flex:1;min-width:0;">${pickerOptionsHtml()}</select>
+                <button id="chron-lib-load" style="${BTN}">Load</button>
+            </div>
+            <button id="chron-lib-del" style="${BTN}font-size:11px;color:#e6a0a0;margin-top:5px;width:100%;box-sizing:border-box;">Delete selected (saved only)</button>
+            ${empty ? '' : `
+            <div style="margin-top:8px;border-top:1px dashed rgba(150,170,210,0.2);padding-top:6px;">
+                <div style="font-size:11px;opacity:0.8;margin-bottom:4px;">💾 Save current ladder</div>
+                <input type="text" id="chron-save-name" placeholder="name this ladder…" style="${TXT}width:100%;box-sizing:border-box;margin-bottom:5px;">
+                <div style="display:flex;gap:6px;">
+                    <select id="chron-save-scope" style="${SEL}flex:1;min-width:0;">
+                        <option value="character">This character (travels)</option>
+                        <option value="global">Global (everywhere)</option>
+                    </select>
+                    <button id="chron-save-btn" style="${BTN}">Save</button>
+                </div>
+            </div>`}
+            <div id="chron-lib-msg" style="font-size:11px;opacity:0.75;margin-top:5px;"></div>
+        </div>`;
+
+    const idleBlock = `
+        <div style="border-top:1px solid rgba(150,170,210,0.2);margin:6px 0;padding-top:10px;text-align:center;">
+            <div style="opacity:0.8;font-size:12px;">No ladder loaded — this chat is idle.</div>
+            <div style="opacity:0.5;font-size:10px;margin-top:3px;">Pick a template below to begin. Idle means Chronicler can't fight a story it wasn't authored for.</div>
+        </div>`;
+
+    const loadedBlock = `
         <div style="border-top:1px solid rgba(150,170,210,0.2);margin:6px 0;padding-top:6px;">
             <div style="display:flex;align-items:baseline;justify-content:space-between;">
                 <b style="font-size:13px;">${esc(r.title || '—')}</b>
@@ -561,23 +792,43 @@ function panelHtml() {
                     Prefer a non-reasoning utility profile (e.g. GLM-4.7). Reasoning models spend the budget on hidden thinking first — raise it to 4000+ if checks get cut off.
                 </div>
             </div>
-        </div>
+        </div>`;
 
+    const loadSection = `
         <div style="border-top:1px solid rgba(150,170,210,0.2);margin-top:6px;padding-top:6px;">
-            <div id="chron-load-toggle" style="cursor:pointer;opacity:0.7;font-size:11px;">▸ Load ladder JSON</div>
+            <div id="chron-load-toggle" style="cursor:pointer;opacity:0.7;font-size:11px;">▸ Ladder JSON ${empty ? '' : '/ manage'}</div>
             <div id="chron-load-box" style="display:none;margin-top:6px;">
                 <textarea id="chron-ladder-json" style="${TA}" placeholder='[ { "title": "Calm", "situation": "…", "mandate": ["…"], "exit": "what must happen to advance" }, … ]'></textarea>
-                <div style="display:flex;gap:8px;margin-top:6px;">
+                <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;">
                     <button id="chron-load-apply" style="${BTN}flex:1;">Apply</button>
-                    <button id="chron-load-export" style="${BTN}">Copy current</button>
+                    ${empty ? '' : `<button id="chron-load-export" style="${BTN}">Copy current</button>`}
+                    ${empty ? '' : `<button id="chron-load-clear" style="${BTN}color:#e6a0a0;">Clear → idle</button>`}
                 </div>
                 <div id="chron-load-msg" style="font-size:11px;opacity:0.75;margin-top:5px;"></div>
             </div>
+        </div>`;
+
+    const footer = empty
+        ? `<div style="opacity:0.5;font-size:10px;margin-top:8px;">Phase 1.5 — idle until a ladder is loaded. Pick a mode, then load a ladder (or the demo).</div>`
+        : `<div style="opacity:0.5;font-size:10px;margin-top:8px;">Phase 1.5 — <b>${cs.mode}</b> mode. The walker judges the <b>Exit →</b> trigger each AI turn (confidence ≥ ${s.minConfidence}); you can also advance by hand.</div>`;
+
+    return `
+    <div id="chronicler-panel" style="${PANEL_STYLE}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <b style="font-size:14px;">📖 Chronicler</b>
+            <span id="chron-close" style="cursor:pointer;opacity:0.7;padding:2px 6px;">✕</span>
         </div>
 
-        <div style="opacity:0.5;font-size:10px;margin-top:8px;">
-            Phase 1 — the walker judges the <b>Exit →</b> trigger each AI turn and advances when met (confidence ≥ ${s.minConfidence}). You can still advance by hand anytime.
+        <div style="${ROW}">
+            <span>Enabled</span>
+            <input type="checkbox" id="chron-enabled" ${s.enabled ? 'checked' : ''}>
         </div>
+
+        ${modeRow}
+        ${empty ? idleBlock : loadedBlock}
+        ${libSection}
+        ${loadSection}
+        ${footer}
     </div>`;
 }
 
@@ -632,6 +883,48 @@ function bindPanelEvents() {
         try { navigator.clipboard?.writeText(json); } catch (_) { /* */ }
         const msg = document.getElementById('chron-load-msg');
         if (msg) { msg.textContent = '✓ Current ladder copied into the box.'; msg.style.color = '#9fd6a0'; }
+    });
+    $('#chron-load-clear').on('click', function () {
+        clearLadder();
+        try { toastr.info('Ladder cleared — chat is idle.', '📖 Chronicler', { timeOut: 2500 }); } catch (_) { /* */ }
+    });
+
+    // Mode switch
+    $('.chron-mode-btn').on('click', function () {
+        setMode(this.getAttribute('data-mode'));
+    });
+    // Load demo (idle state)
+    $('#chron-load-demo').on('click', function () {
+        loadDemo();
+        try { toastr.info('Demo zombie ladder loaded (World mode).', '📖 Chronicler', { timeOut: 2500 }); } catch (_) { /* */ }
+    });
+
+    // Library: load / delete / save
+    $('#chron-lib-load').on('click', function () {
+        const val = String($('#chron-lib-select').val() || '');
+        const msg = document.getElementById('chron-lib-msg');
+        if (!val) { if (msg) { msg.textContent = 'Pick a ladder first.'; msg.style.color = '#e6a0a0'; } return; }
+        let ok = false, label = '';
+        if (val.startsWith('tpl:')) { ok = loadTemplate(val.slice(4)); label = TEMPLATES[val.slice(4)]?.name || 'template'; }
+        else if (val.startsWith('lib:')) { const e = getLibrary().find(x => x.id === val.slice(4)); ok = loadSaved(val.slice(4)); label = e?.name || 'saved ladder'; }
+        if (ok) { try { toastr.success(`Loaded “${label}”.`, '📖 Chronicler', { timeOut: 2500 }); } catch (_) { /* */ } }
+    });
+    $('#chron-lib-del').on('click', function () {
+        const val = String($('#chron-lib-select').val() || '');
+        const msg = document.getElementById('chron-lib-msg');
+        if (!val.startsWith('lib:')) { if (msg) { msg.textContent = 'Only saved ladders can be deleted (templates are built in).'; msg.style.color = '#e6a0a0'; } return; }
+        deleteSaved(val.slice(4));
+        try { toastr.info('Saved ladder deleted.', '📖 Chronicler', { timeOut: 2200 }); } catch (_) { /* */ }
+    });
+    $('#chron-save-btn').on('click', function () {
+        const name = String($('#chron-save-name').val() || '');
+        const scope = String($('#chron-save-scope').val() || 'character');
+        const res = saveCurrent(name, scope);
+        const msg = document.getElementById('chron-lib-msg');
+        if (msg) {
+            msg.textContent = res.ok ? `✓ Saved “${res.entry.name}” (${res.entry.scope === 'character' ? 'this character' : 'global'}).` : '✗ ' + res.error;
+            msg.style.color = res.ok ? '#9fd6a0' : '#e6a0a0';
+        }
     });
 }
 
@@ -719,7 +1012,12 @@ function initUI() {
 function registerAPI() {
     window.ChroniclerAPI = {
         isActive: () => settings().enabled === true,
-        getActiveEra: () => (activeRung()?.era || activeRung()?.title || null),
+        // The Codex bridge reads this. It returns an era ONLY in character mode —
+        // so world/off mode never flips a character state, and character mode does.
+        getActiveEra: () => (settings().enabled && getMode() === 'character' && !ladderEmpty()
+            ? (activeRung()?.era || activeRung()?.title || null) : null),
+        getMode: () => getMode(),
+        setMode: (m) => setMode(m),
         getActiveRung: () => { const r = activeRung(); return r ? { ...r } : null; },
         getPointer: () => chatState().pointer,
         getRungCount: () => chatState().ladder.length,
@@ -729,6 +1027,9 @@ function registerAPI() {
         retreat: () => step(-1),
         goTo: (i) => goTo(i),
         checkNow: () => runWalker(-1, true),   // force a walker evaluation
+        listTemplates: () => Object.keys(TEMPLATES).map(k => ({ key: k, name: TEMPLATES[k].name })),
+        loadTemplate: (k) => loadTemplate(k),
+        saveLadder: (name, scope) => saveCurrent(name, scope),
         version: VERSION,
     };
     console.log(`${TAG} Public API registered → window.ChroniclerAPI`);
@@ -761,15 +1062,18 @@ function cmdDebug() {
         return `fab: in DOM at ${Math.round(rc.left)},${Math.round(rc.top)} ${vis ? '(on-screen)' : '⚠️ OFF-SCREEN'}`;
     })();
     const lines = [
-        `enabled: ${s.enabled} | walker: ${s.walkerEnabled}`,
-        `pointer: ${cs.pointer} (${rungLine(cs)}) — ${r ? (r.era || r.title) : 'none'}`,
-        `exit watched: ${r && r.exit ? '“' + r.exit.slice(0, 60) + (r.exit.length > 60 ? '…' : '') + '”' : '(terminal — idle)'}`,
+        `enabled: ${s.enabled} | mode: ${cs.mode} | walker: ${s.walkerEnabled}`,
+        ladderEmpty()
+            ? 'ladder: (empty — idle, injects nothing)'
+            : `pointer: ${cs.pointer} (${rungLine(cs)}) — ${r ? (r.era || r.title) : 'none'}`,
+        `output: ${ladderEmpty() ? 'none' : (cs.mode === 'world' ? 'injecting mandate' : cs.mode === 'character' ? 'driving Codex era (getActiveEra)' : 'paused')}`,
+        ladderEmpty() ? '' : `exit watched: ${r && r.exit ? '“' + r.exit.slice(0, 55) + (r.exit.length > 55 ? '…' : '') + '”' : '(terminal — idle)'}`,
         `walker last: ${cs._walker?.last || '—'} | in-flight: ${walkerInFlight}`,
         `profile: ${s.walkerProfile} → ${profId ? 'resolved ✓' : '❌ unresolved'}`,
         `transport: ${ctx().ConnectionManagerRequestService ? 'ConnectionManagerRequestService ✓' : '❌ unavailable'}`,
         `budget: ${s.tokenBudget} | minConf: ${s.minConfidence} | cooldown: ${s.cooldownMessages}`,
         fabLine,
-    ].join('<br>');
+    ].filter(Boolean).join('<br>');
     try { toastr.info(lines, '📖 Chronicler state', { timeOut: 11000, escapeHtml: false }); } catch (_) { /* */ }
     return '';
 }
