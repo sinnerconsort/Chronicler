@@ -60,7 +60,7 @@ const EXT_ID = 'chronicler';
 const TAG = '[Chronicler]';
 const INJECT_KEY = 'CHRONICLER';
 const Z = 31000;
-const VERSION = '0.5.1';
+const VERSION = '0.6.0';
 
 // ─────────────────────────────────────────────────────────────────
 // Default ladder — demo zombie escalation. Each rung is the World-Forge
@@ -543,30 +543,96 @@ async function callUtility(prompt, maxTokens) {
     return (res && typeof res === 'object' && 'content' in res) ? res.content : res;
 }
 
-// ── Generator (2b): premise → ladder, via the walker's connection ──
-function buildGenPrompt(premise, n) {
-    return [
-        'You are a story-structure author. Build a beat ladder (a plot / world spine) for the premise below.',
+// ── Generator (2b): builds a ladder grounded in the ACTUAL story ──
+// Reads the siblings (card, persona, Lexicon world facts, recent chat) so the
+// spine fits the established world instead of inventing generic genre furniture.
+// The premise is optional flavor layered ON TOP of that context, not a replacement.
+function clip(s, max) {
+    s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    return s.length > max ? s.slice(0, max) + '…' : s;
+}
+
+function gatherStoryContext() {
+    const c = ctx();
+    const parts = [];
+    // Character card — the core world/cast grounding
+    try {
+        const id = (c.characterId !== undefined && c.characterId !== null) ? c.characterId : c.this_chid;
+        const char = c.characters?.[id];
+        if (char) {
+            if (char.name) parts.push(`Character: ${char.name}`);
+            if (char.description) parts.push(`Description: ${clip(char.description, 900)}`);
+            if (char.scenario) parts.push(`Scenario: ${clip(char.scenario, 400)}`);
+            if (char.personality) parts.push(`Personality: ${clip(char.personality, 300)}`);
+        }
+    } catch (_) { /* */ }
+    // User persona
+    try {
+        const pd = c.power_user?.persona_description || c.personaDescription || '';
+        if (pd) parts.push(`User persona: ${clip(pd, 300)}`);
+    } catch (_) { /* */ }
+    // Lexicon — established world facts
+    try {
+        const lex = window.LexiconAPI;
+        if (lex && lex.isActive?.() !== false) {
+            let block = '';
+            if (typeof lex.getLoreContextBlock === 'function') block = lex.getLoreContextBlock();
+            if (!block && typeof lex.getEntries === 'function') {
+                const es = lex.getEntries({}) || [];
+                block = es.slice(0, 12).map(e => `${e.title || e.key || ''}: ${clip(e.content || e.value || '', 180)}`).join('\n');
+            }
+            if (block) parts.push(`Established world facts (Lexicon):\n${clip(block, 1500)}`);
+        }
+    } catch (_) { /* */ }
+    // Recent scene — the setting/tone actually in play right now
+    try {
+        const chat = c.chat || [];
+        const msgs = chat.filter(m => m && !m.is_system).slice(-4);
+        if (msgs.length) {
+            const name1 = c.name1 || 'User', name2 = c.name2 || 'Character';
+            const recent = msgs.map(m => `${m.is_user ? name1 : (m.name || name2)}: ${clip(m.mes, 300)}`).join('\n');
+            parts.push(`Recent scene (the setting actually in play):\n${recent}`);
+        }
+    } catch (_) { /* */ }
+    return parts.join('\n\n');
+}
+
+function buildGenPrompt(premise, n, context) {
+    const lines = [
+        'You are a story-structure author. Build a beat ladder (a plot / world spine) that fits the ESTABLISHED story below.',
         '',
+    ];
+    if (context) {
+        lines.push('ESTABLISHED CONTEXT — the ladder MUST fit this exact world, setting, and cast. Do NOT relocate the story, invent a new setting, swap the genre\'s default backdrop in, or contradict any of these facts. If the scene is a modern city, the arc happens in that city:');
+        lines.push(context);
+        lines.push('');
+    }
+    if (premise) {
+        lines.push(`Creative direction / tone to shape the arc toward: ${premise}`);
+        lines.push('Treat this as flavor layered ONTO the established context above — bend the existing world toward this tone, do not replace the world with the tone\'s clichés.');
+        lines.push('');
+    }
+    lines.push(
         'Output ONLY a JSON array of beats — no preamble, no commentary, no markdown fences. Each beat is an object:',
         '{ "title": "short beat name", "genre": "tonal register for this beat", "situation": "one sentence: what is true in the world at this beat", "mandate": ["2-3 imperative directives for writing this beat"], "exit": "the observable on-screen condition that, once met, advances the story to the next beat" }',
         '',
         `Produce ${n} beats in dramatic order. The FINAL beat must have "exit": "" (terminal).`,
         'Keep the beats COARSE — arc-level turning points (think an 8-beat Story Circle), where each beat spans MULTIPLE scenes of play. Do NOT write a fine, scene-by-scene shot list: too many small beats turn every rung into a lock and strangle pacing. Fewer, bigger beats are better.',
         'Exits must be judgeable from what happens on-screen — concrete events, not vague mood. Mandates are imperative ("Keep the dread close," never "it is dreadful").',
-        '',
-        'Premise:',
-        premise,
-    ].join('\n');
+    );
+    return lines.join('\n');
 }
 
 async function generateLadder(premise, count) {
     const c = ctx();
     if (!c.ConnectionManagerRequestService) return { ok: false, error: 'No background connection available (set a profile in the Walker section).' };
     if (!resolveProfileId(settings().walkerProfile)) return { ok: false, error: 'No connection profile resolved — set one in the Walker section.' };
+    const context = gatherStoryContext();
+    premise = String(premise || '').trim();
+    if (!context && !premise) return { ok: false, error: 'Nothing to build from — give a premise, or open this in a chat with a card / world / scene.' };
     const n = Math.max(4, Math.min(12, (count | 0) || 8)); // coarse: arc-level beats, capped low
     let raw;
-    try { raw = await callUtility(buildGenPrompt(String(premise || '').trim(), n), 4000); }
+    try { raw = await callUtility(buildGenPrompt(premise, n, context), 4000); }
     catch (e) { return { ok: false, error: e?.message || String(e) }; }
     let txt = String(raw == null ? '' : raw).replace(/```json|```/g, '').trim();
     const m = txt.match(/\[[\s\S]*\]/);
@@ -805,13 +871,13 @@ function panelHtml() {
         <div style="border-top:1px solid rgba(150,170,210,0.2);margin-top:6px;padding-top:6px;">
             <div id="chron-gen-toggle" style="cursor:pointer;opacity:0.85;font-size:12px;">${empty ? '✨ Generate a ladder' : '▸ ✨ Generate a ladder'}</div>
             <div id="chron-gen-box" style="margin-top:6px;${empty ? '' : 'display:none;'}">
-                <textarea id="chron-gen-premise" style="${TA}min-height:58px;" placeholder="premise / genre / what this story is about…"></textarea>
+                <textarea id="chron-gen-premise" style="${TA}min-height:58px;" placeholder="optional: a tone or direction (e.g. 'gothic vampire thriller'). Leave blank to build straight from the card, world & scene."></textarea>
                 <div style="display:flex;gap:6px;align-items:center;margin-top:5px;">
                     <span style="font-size:11px;opacity:0.7;">beats</span>
                     <input type="number" id="chron-gen-count" value="8" min="4" max="12" step="1" style="${NUM}width:56px;">
                     <button id="chron-gen-btn" style="${BTN}flex:1;">Generate</button>
                 </div>
-                <div id="chron-gen-msg" style="font-size:11px;opacity:0.75;margin-top:5px;">Uses the Walker's connection profile.</div>
+                <div id="chron-gen-msg" style="font-size:11px;opacity:0.75;margin-top:5px;">Reads your card, world & recent scene; premise is extra steer. Uses the Walker's profile.</div>
             </div>
         </div>`;
 
@@ -1016,8 +1082,7 @@ function bindPanelEvents() {
         const premise = String($('#chron-gen-premise').val() || '').trim();
         const count = parseInt($('#chron-gen-count').val(), 10) || 8;
         const msg = document.getElementById('chron-gen-msg');
-        if (!premise) { if (msg) { msg.textContent = 'Give it a premise first.'; msg.style.color = '#e6a0a0'; } return; }
-        if (msg) { msg.textContent = 'Generating…'; msg.style.color = '#ccd4e6'; }
+        if (msg) { msg.textContent = 'Generating from context…'; msg.style.color = '#ccd4e6'; }
         const btn = this; btn.disabled = true; btn.textContent = '…';
         try {
             const res = await generateLadder(premise, count);
