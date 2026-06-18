@@ -60,7 +60,7 @@ const EXT_ID = 'chronicler';
 const TAG = '[Chronicler]';
 const INJECT_KEY = 'CHRONICLER';
 const Z = 31000;
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 
 // ─────────────────────────────────────────────────────────────────
 // Default ladder — demo zombie escalation. Each rung is the World-Forge
@@ -1118,9 +1118,11 @@ function positionPanel() {
     const fab = fabEl();
     if (!panel || !fab) return;
     const r = fab.getBoundingClientRect();
-    const pw = Math.min(300, window.innerWidth - 20);
-    let left = r.right + 8;
-    if (left + pw > window.innerWidth - 10) left = Math.max(10, window.innerWidth - pw - 10);
+    const measured = panel.getBoundingClientRect().width;
+    const pw = measured || Math.min(360, window.innerWidth - 16);
+    let left = r.right + 8;                                   // prefer just right of the FAB
+    if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8; // would overflow → pin to right margin
+    left = Math.max(8, left);                                 // never clip the left edge
     panel.style.left = left + 'px';
     panel.style.top = r.top + 'px';
     panel.style.right = 'auto';
