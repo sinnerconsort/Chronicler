@@ -65,7 +65,7 @@ const EXT_ID = 'chronicler';
 const TAG = '[Chronicler]';
 const INJECT_KEY = 'CHRONICLER';
 const Z = 31000;
-const VERSION = '0.8.0';
+const VERSION = '0.8.1';
 
 // ─────────────────────────────────────────────────────────────────
 // Default ladder — demo zombie escalation. Each rung is the World-Forge
@@ -579,12 +579,18 @@ function gatherStoryContext() {
             if (char.description) parts.push(`Description: ${clip(char.description, 900)}`);
             if (char.scenario) parts.push(`Scenario: ${clip(char.scenario, 400)}`);
             if (char.personality) parts.push(`Personality: ${clip(char.personality, 300)}`);
+            if (char.first_mes) parts.push(`Opening scene (first message — anchors the original setting): ${clip(char.first_mes, 450)}`);
         }
     } catch (_) { /* */ }
-    // User persona
+    // User persona ({{user}}) — name is on the context (name1), description on powerUserSettings
     try {
-        const pd = c.power_user?.persona_description || c.personaDescription || '';
-        if (pd) parts.push(`User persona: ${clip(pd, 300)}`);
+        const personaName = c.name1 || '';
+        const pd = c.powerUserSettings?.persona_description
+            || c.power_user?.persona_description
+            || c.personaDescription || '';
+        if (personaName || pd) {
+            parts.push(`User persona — ${personaName || 'the user'}${pd ? `: ${clip(pd, 450)}` : ' (no description set; treat as the player character)'}`);
+        }
     } catch (_) { /* */ }
     // Lexicon — established world facts
     try {
