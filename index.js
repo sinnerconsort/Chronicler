@@ -60,7 +60,7 @@ const EXT_ID = 'chronicler';
 const TAG = '[Chronicler]';
 const INJECT_KEY = 'CHRONICLER';
 const Z = 31000;
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 
 // ─────────────────────────────────────────────────────────────────
 // Default ladder — demo zombie escalation. Each rung is the World-Forge
@@ -709,13 +709,17 @@ async function runWalker(mesId, force = false) {
 // ─────────────────────────────────────────────────────────────────
 
 const FAB_STYLE = `position:fixed;left:0;top:0;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3a4a6a,#1c2230);color:#e6ecf5;border:2px solid rgba(190,150,90,0.75);box-shadow:0 2px 8px rgba(0,0,0,0.45);z-index:${Z};display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;touch-action:none;`;
-const PANEL_STYLE = `position:fixed;left:0;top:0;width:min(300px, calc(100vw - 20px));max-height:82vh;overflow-y:auto;background:rgba(18,22,32,0.97);border:1px solid rgba(150,170,210,0.35);border-radius:12px;padding:12px;z-index:${Z};color:#e6ecf5;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,0.55);display:none;`;
+const PANEL_STYLE = `position:fixed;left:0;top:0;width:min(360px, calc(100vw - 16px));max-height:84vh;overflow-y:auto;background:rgba(18,22,32,0.97);border:1px solid rgba(150,170,210,0.35);border-radius:12px;padding:12px;z-index:${Z};color:#e6ecf5;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,0.55);display:none;`;
 const ROW = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin:7px 0;';
 const BTN = 'background:#222c40;color:#e6ecf5;border:1px solid rgba(150,170,210,0.35);border-radius:6px;padding:5px 10px;font-size:13px;cursor:pointer;';
 const TA = 'width:100%;box-sizing:border-box;background:#141926;color:#cfd8e8;border:1px solid rgba(150,170,210,0.3);border-radius:6px;padding:6px;font-size:11px;font-family:monospace;min-height:90px;';
 const NUM = 'background:#141926;color:#e6ecf5;border:1px solid rgba(150,170,210,0.3);border-radius:6px;padding:3px 6px;font-size:12px;width:70px;';
 const SEL = 'background:#141926;color:#e6ecf5;border:1px solid rgba(150,170,210,0.3);border-radius:6px;padding:3px 6px;font-size:12px;';
 const TXT = 'background:#141926;color:#e6ecf5;border:1px solid rgba(150,170,210,0.3);border-radius:6px;padding:3px 6px;font-size:12px;width:120px;';
+const TABBTN = 'flex:1;background:transparent;color:#aeb8cc;border:none;border-bottom:2px solid transparent;padding:7px 4px;font-size:12px;cursor:pointer;';
+const TABON = 'color:#e6ecf5;border-bottom-color:rgba(190,150,90,0.9);font-weight:bold;';
+
+let activeTab = 'now';   // session-only; which panel tab is showing
 
 const FAB_W = 40, FAB_H = 40, PAD = 5;
 
@@ -820,6 +824,11 @@ function modeBtn(cs, value, label) {
     return `<button class="chron-mode-btn" data-mode="${value}" style="${BTN}flex:1;font-size:11px;padding:4px 6px;${sel}">${label}</button>`;
 }
 
+function tabBtn(tab, label) {
+    const on = activeTab === tab;
+    return `<button class="chron-tab" data-tab="${tab}" style="${TABBTN}${on ? TABON : ''}">${label}</button>`;
+}
+
 function panelHtml() {
     const s = settings();
     const cs = chatState();
@@ -844,117 +853,109 @@ function panelHtml() {
         </div>
         <div style="opacity:0.55;font-size:10px;margin:0 0 6px;">${modeHint}</div>`;
 
-    const libSection = `
-        <div style="border-top:1px solid rgba(150,170,210,0.2);margin-top:6px;padding-top:6px;">
-            <div style="font-size:11px;opacity:0.8;margin-bottom:4px;">📚 Load a ladder</div>
-            <div style="display:flex;gap:6px;">
-                <select id="chron-lib-select" style="${SEL}flex:1;min-width:0;">${pickerOptionsHtml()}</select>
-                <button id="chron-lib-load" style="${BTN}">Load</button>
-            </div>
-            <button id="chron-lib-del" style="${BTN}font-size:11px;color:#e6a0a0;margin-top:5px;width:100%;box-sizing:border-box;">Delete selected (saved only)</button>
-            ${empty ? '' : `
-            <div style="margin-top:8px;border-top:1px dashed rgba(150,170,210,0.2);padding-top:6px;">
-                <div style="font-size:11px;opacity:0.8;margin-bottom:4px;">💾 Save current ladder</div>
-                <input type="text" id="chron-save-name" placeholder="name this ladder…" style="${TXT}width:100%;box-sizing:border-box;margin-bottom:5px;">
-                <div style="display:flex;gap:6px;">
-                    <select id="chron-save-scope" style="${SEL}flex:1;min-width:0;">
-                        <option value="character">This character (travels)</option>
-                        <option value="global">Global (everywhere)</option>
-                    </select>
-                    <button id="chron-save-btn" style="${BTN}">Save</button>
-                </div>
-            </div>`}
-            <div id="chron-lib-msg" style="font-size:11px;opacity:0.75;margin-top:5px;"></div>
-        </div>`;
+    // ───────── NOW: where are we right now ─────────
+    const rungDisplay = empty
+        ? `<div style="text-align:center;padding:14px 4px;">
+               <div style="opacity:0.8;font-size:12px;">No ladder loaded — idle.</div>
+               <div style="opacity:0.5;font-size:10px;margin-top:4px;">Open the <b>Build</b> tab to load a template or generate one.</div>
+           </div>`
+        : `<div style="margin:6px 0;">
+               <div style="display:flex;align-items:baseline;justify-content:space-between;">
+                   <b style="font-size:14px;">${esc(r.title || '—')}</b>
+                   <span style="opacity:0.6;font-size:11px;">${esc(rungLine(cs))}</span>
+               </div>
+               ${r.genre ? `<div style="opacity:0.7;font-size:11px;margin-top:1px;">${esc(r.genre)}</div>` : ''}
+               ${r.situation ? `<div style="margin-top:6px;font-size:12px;">${esc(r.situation)}</div>` : ''}
+               ${mandate ? `<ul style="margin:6px 0 0 0;padding-left:18px;opacity:0.85;font-size:11px;">${mandate}</ul>` : ''}
+               ${r.exit ? `<div style="margin-top:7px;font-size:11px;opacity:0.7;"><b>Exit →</b> ${esc(r.exit)}</div>`
+                        : `<div style="margin-top:7px;font-size:11px;opacity:0.5;">terminal rung — walker idle here</div>`}
+           </div>
+           <div style="display:flex;gap:8px;margin:10px 0 2px;">
+               <button id="chron-back" style="${BTN}flex:1;${atStart ? 'opacity:0.4;' : ''}">◀ Back</button>
+               <button id="chron-adv" style="${BTN}flex:1;${atEnd ? 'opacity:0.4;' : ''}">Advance ▶</button>
+           </div>`;
+    const nowPane = `
+        <div style="${ROW}"><span>Enabled</span><input type="checkbox" id="chron-enabled" ${s.enabled ? 'checked' : ''}></div>
+        ${modeRow}
+        ${rungDisplay}`;
 
-    const genSection = `
-        <div style="border-top:1px solid rgba(150,170,210,0.2);margin-top:6px;padding-top:6px;">
-            <div id="chron-gen-toggle" style="cursor:pointer;opacity:0.85;font-size:12px;">${empty ? '✨ Generate a ladder' : '▸ ✨ Generate a ladder'}</div>
-            <div id="chron-gen-box" style="margin-top:6px;${empty ? '' : 'display:none;'}">
-                <textarea id="chron-gen-premise" style="${TA}min-height:58px;" placeholder="optional: a tone or direction (e.g. 'gothic vampire thriller'). Leave blank to build straight from the card, world & scene."></textarea>
-                <div style="display:flex;gap:6px;align-items:center;margin-top:5px;">
-                    <span style="font-size:11px;opacity:0.7;">beats</span>
-                    <input type="number" id="chron-gen-count" value="8" min="4" max="12" step="1" style="${NUM}width:56px;">
-                    <button id="chron-gen-btn" style="${BTN}flex:1;">Generate</button>
+    // ───────── LADDER: the whole spine + raw JSON ─────────
+    const rungList = empty
+        ? `<div style="opacity:0.6;font-size:12px;text-align:center;padding:12px 4px;">No ladder. Load or generate one in <b>Build</b>.</div>`
+        : `<div style="margin:2px 0;">` + cs.ladder.map((rg, i) => {
+            const cur = i === cs.pointer;
+            return `<div style="display:flex;gap:7px;padding:5px 0;border-bottom:1px solid rgba(150,170,210,0.1);${cur ? '' : 'opacity:0.6;'}">
+                <span style="width:14px;text-align:right;font-size:11px;opacity:0.7;">${cur ? '▶' : (i + 1)}</span>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:12px;${cur ? 'font-weight:bold;' : ''}">${esc(rg.title || '—')}</div>
+                    ${rg.exit ? `<div style="font-size:10px;opacity:0.6;">→ ${esc(clip(rg.exit, 72))}</div>` : `<div style="font-size:10px;opacity:0.45;">terminal</div>`}
                 </div>
-                <div id="chron-gen-msg" style="font-size:11px;opacity:0.75;margin-top:5px;">Reads your card, world & recent scene; premise is extra steer. Uses the Walker's profile.</div>
-            </div>
-        </div>`;
-
-    const idleBlock = `
-        <div style="border-top:1px solid rgba(150,170,210,0.2);margin:6px 0;padding-top:10px;text-align:center;">
-            <div style="opacity:0.8;font-size:12px;">No ladder loaded — this chat is idle.</div>
-            <div style="opacity:0.5;font-size:10px;margin-top:3px;">Pick a template below to begin. Idle means Chronicler can't fight a story it wasn't authored for.</div>
-        </div>`;
-
-    const loadedBlock = `
-        <div style="border-top:1px solid rgba(150,170,210,0.2);margin:6px 0;padding-top:6px;">
-            <div style="display:flex;align-items:baseline;justify-content:space-between;">
-                <b style="font-size:13px;">${esc(r.title || '—')}</b>
-                <span style="opacity:0.6;font-size:11px;">${esc(rungLine(cs))}</span>
-            </div>
-            ${r.genre ? `<div style="opacity:0.7;font-size:11px;margin-top:1px;">${esc(r.genre)}</div>` : ''}
-            ${r.situation ? `<div style="margin-top:5px;font-size:12px;">${esc(r.situation)}</div>` : ''}
-            ${mandate ? `<ul style="margin:5px 0 0 0;padding-left:18px;opacity:0.85;font-size:11px;">${mandate}</ul>` : ''}
-            ${r.exit ? `<div style="margin-top:6px;font-size:11px;opacity:0.7;"><b>Exit →</b> ${esc(r.exit)}</div>`
-                     : `<div style="margin-top:6px;font-size:11px;opacity:0.5;">terminal rung — walker idle here</div>`}
-        </div>
-
-        <div style="display:flex;gap:8px;margin:8px 0;">
-            <button id="chron-back" style="${BTN}flex:1;${atStart ? 'opacity:0.4;' : ''}">◀ Back</button>
-            <button id="chron-adv" style="${BTN}flex:1;${atEnd ? 'opacity:0.4;' : ''}">Advance ▶</button>
-        </div>
-
-        <div style="border-top:1px solid rgba(150,170,210,0.2);margin-top:6px;padding-top:6px;">
-            <div id="chron-walk-toggle" style="cursor:pointer;opacity:0.8;font-size:12px;">▾ Walker (auto-advance)</div>
-            <div id="chron-walk-box" style="margin-top:6px;">
-                <div style="${ROW}">
-                    <span>Auto-advance</span>
-                    <input type="checkbox" id="chron-walk-en" ${s.walkerEnabled ? 'checked' : ''}>
-                </div>
-                <div style="${ROW}">
-                    <span>Profile</span>
-                    <input type="text" id="chron-walk-profile" value="${esc(s.walkerProfile)}" style="${TXT}">
-                </div>
-                <div style="${ROW}">
-                    <span>Token budget</span>
-                    <input type="number" id="chron-walk-budget" value="${s.tokenBudget}" min="256" step="256" style="${NUM}">
-                </div>
-                <div style="${ROW}">
-                    <span>Min confidence</span>
-                    <input type="number" id="chron-walk-conf" value="${s.minConfidence}" min="0" max="1" step="0.05" style="${NUM}">
-                </div>
-                <div style="${ROW}">
-                    <span>Cooldown (msgs)</span>
-                    <input type="number" id="chron-walk-cd" value="${s.cooldownMessages}" min="0" step="1" style="${NUM}">
-                </div>
-                <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
-                    <button id="chron-walk-check" style="${BTN}flex:1;">Check now</button>
-                    <span style="font-size:11px;opacity:0.6;">last: ${last}</span>
-                </div>
-                <div style="opacity:0.5;font-size:10px;margin-top:5px;">
-                    Prefer a non-reasoning utility profile (e.g. GLM-4.7). Reasoning models spend the budget on hidden thinking first — raise it to 4000+ if checks get cut off.
-                </div>
-            </div>
-        </div>`;
-
-    const loadSection = `
-        <div style="border-top:1px solid rgba(150,170,210,0.2);margin-top:6px;padding-top:6px;">
-            <div id="chron-load-toggle" style="cursor:pointer;opacity:0.7;font-size:11px;">▸ Ladder JSON ${empty ? '' : '/ manage'}</div>
-            <div id="chron-load-box" style="display:none;margin-top:6px;">
+            </div>`;
+        }).join('') + `</div>`;
+    const ladderPane = `
+        ${rungList}
+        <div style="border-top:1px solid rgba(150,170,210,0.2);margin-top:8px;padding-top:6px;">
+            <div id="chron-load-toggle" style="cursor:pointer;opacity:0.8;font-size:12px;">▾ Edit as JSON</div>
+            <div id="chron-load-box" style="margin-top:6px;">
                 <textarea id="chron-ladder-json" style="${TA}" placeholder='[ { "title": "Calm", "situation": "…", "mandate": ["…"], "exit": "what must happen to advance" }, … ]'></textarea>
                 <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;">
                     <button id="chron-load-apply" style="${BTN}flex:1;">Apply</button>
-                    ${empty ? '' : `<button id="chron-load-export" style="${BTN}">Copy current</button>`}
-                    ${empty ? '' : `<button id="chron-load-clear" style="${BTN}color:#e6a0a0;">Clear → idle</button>`}
+                    ${empty ? '' : `<button id="chron-load-export" style="${BTN}">Copy</button>`}
+                    ${empty ? '' : `<button id="chron-load-clear" style="${BTN}color:#e6a0a0;">Clear</button>`}
                 </div>
                 <div id="chron-load-msg" style="font-size:11px;opacity:0.75;margin-top:5px;"></div>
             </div>
         </div>`;
 
-    const footer = empty
-        ? `<div style="opacity:0.5;font-size:10px;margin-top:8px;">Phase 1.5 — idle until a ladder is loaded. Pick a mode, then load a ladder (or the demo).</div>`
-        : `<div style="opacity:0.5;font-size:10px;margin-top:8px;">Phase 1.5 — <b>${cs.mode}</b> mode. The walker judges the <b>Exit →</b> trigger each AI turn (confidence ≥ ${s.minConfidence}); you can also advance by hand.</div>`;
+    // ───────── BUILD: templates, library, generator ─────────
+    const libSection = `
+        <div style="font-size:11px;opacity:0.8;margin-bottom:4px;">📚 Load a ladder</div>
+        <div style="display:flex;gap:6px;">
+            <select id="chron-lib-select" style="${SEL}flex:1;min-width:0;">${pickerOptionsHtml()}</select>
+            <button id="chron-lib-load" style="${BTN}">Load</button>
+        </div>
+        <button id="chron-lib-del" style="${BTN}font-size:11px;color:#e6a0a0;margin-top:5px;width:100%;box-sizing:border-box;">Delete selected (saved only)</button>
+        ${empty ? '' : `
+        <div style="margin-top:8px;border-top:1px dashed rgba(150,170,210,0.2);padding-top:6px;">
+            <div style="font-size:11px;opacity:0.8;margin-bottom:4px;">💾 Save current ladder</div>
+            <input type="text" id="chron-save-name" placeholder="name this ladder…" style="${TXT}width:100%;box-sizing:border-box;margin-bottom:5px;">
+            <div style="display:flex;gap:6px;">
+                <select id="chron-save-scope" style="${SEL}flex:1;min-width:0;">
+                    <option value="character">This character (travels)</option>
+                    <option value="global">Global (everywhere)</option>
+                </select>
+                <button id="chron-save-btn" style="${BTN}">Save</button>
+            </div>
+        </div>`}
+        <div id="chron-lib-msg" style="font-size:11px;opacity:0.75;margin-top:5px;"></div>`;
+
+    const genSection = `
+        <div style="border-top:1px solid rgba(150,170,210,0.2);margin-top:8px;padding-top:8px;">
+            <div style="font-size:11px;opacity:0.85;margin-bottom:4px;">✨ Generate a ladder</div>
+            <textarea id="chron-gen-premise" style="${TA}min-height:54px;" placeholder="optional: a tone or direction (e.g. 'gothic vampire thriller'). Leave blank to build straight from the card, world & scene."></textarea>
+            <div style="display:flex;gap:6px;align-items:center;margin-top:5px;">
+                <span style="font-size:11px;opacity:0.7;">beats</span>
+                <input type="number" id="chron-gen-count" value="8" min="4" max="12" step="1" style="${NUM}width:56px;">
+                <button id="chron-gen-btn" style="${BTN}flex:1;">Generate</button>
+            </div>
+            <div id="chron-gen-msg" style="font-size:11px;opacity:0.7;margin-top:5px;">Reads your card, world &amp; recent scene; premise is extra steer. Uses the Walker's profile.</div>
+        </div>`;
+    const buildPane = `${libSection}${genSection}`;
+
+    // ───────── WALKER: auto-advance controls ─────────
+    const walkerPane = `
+        <div style="${ROW}"><span>Auto-advance</span><input type="checkbox" id="chron-walk-en" ${s.walkerEnabled ? 'checked' : ''}></div>
+        <div style="${ROW}"><span>Profile</span><input type="text" id="chron-walk-profile" value="${esc(s.walkerProfile)}" style="${TXT}"></div>
+        <div style="${ROW}"><span>Token budget</span><input type="number" id="chron-walk-budget" value="${s.tokenBudget}" min="256" step="256" style="${NUM}"></div>
+        <div style="${ROW}"><span>Min confidence</span><input type="number" id="chron-walk-conf" value="${s.minConfidence}" min="0" max="1" step="0.05" style="${NUM}"></div>
+        <div style="${ROW}"><span>Cooldown (msgs)</span><input type="number" id="chron-walk-cd" value="${s.cooldownMessages}" min="0" step="1" style="${NUM}"></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+            <button id="chron-walk-check" style="${BTN}flex:1;">Check now</button>
+            <span style="font-size:11px;opacity:0.6;">last: ${last}</span>
+        </div>
+        <div style="opacity:0.5;font-size:10px;margin-top:8px;">Prefer a non-reasoning utility profile (e.g. GLM-4.7). Reasoning models spend the budget on hidden thinking first — raise it to 4000+ if checks get cut off.</div>`;
+
+    const pane = (tab, html) => `<div class="chron-pane" data-tab="${tab}" style="display:${activeTab === tab ? 'block' : 'none'};">${html}</div>`;
 
     return `
     <div id="chronicler-panel" style="${PANEL_STYLE}">
@@ -962,25 +963,37 @@ function panelHtml() {
             <b style="font-size:14px;">📖 Chronicler</b>
             <span id="chron-close" style="cursor:pointer;opacity:0.7;padding:2px 6px;">✕</span>
         </div>
-
-        <div style="${ROW}">
-            <span>Enabled</span>
-            <input type="checkbox" id="chron-enabled" ${s.enabled ? 'checked' : ''}>
+        <div style="display:flex;gap:2px;border-bottom:1px solid rgba(150,170,210,0.2);margin-bottom:8px;">
+            ${tabBtn('now', 'Now')}${tabBtn('ladder', 'Ladder')}${tabBtn('build', 'Build')}${tabBtn('walker', 'Walker')}
         </div>
-
-        ${modeRow}
-        ${empty ? idleBlock : loadedBlock}
-        ${libSection}
-        ${genSection}
-        ${loadSection}
-        ${footer}
+        ${pane('now', nowPane)}
+        ${pane('ladder', ladderPane)}
+        ${pane('build', buildPane)}
+        ${pane('walker', walkerPane)}
     </div>`;
+}
+
+function switchTab(tab) {
+    activeTab = tab;
+    const panel = document.getElementById('chronicler-panel');
+    if (!panel) return;
+    panel.querySelectorAll('.chron-pane').forEach(p => {
+        p.style.display = (p.getAttribute('data-tab') === tab) ? 'block' : 'none';
+    });
+    panel.querySelectorAll('.chron-tab').forEach(b => {
+        const on = b.getAttribute('data-tab') === tab;
+        b.style.color = on ? '#e6ecf5' : '#aeb8cc';
+        b.style.borderBottomColor = on ? 'rgba(190,150,90,0.9)' : 'transparent';
+        b.style.fontWeight = on ? 'bold' : 'normal';
+    });
+    positionPanel();
 }
 
 let chronOutsideHandler = null;
 
 function bindPanelEvents() {
     $('#chron-close').on('click', closePanel);
+    $('.chron-tab').on('click', function () { switchTab(this.getAttribute('data-tab')); });
     $('#chron-enabled').on('change', function () {
         settings().enabled = $(this).prop('checked'); saveSettings(); applyInjection();
     });
