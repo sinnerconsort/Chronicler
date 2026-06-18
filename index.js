@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════
 // CHRONICLER — the "direct" verb of the suite
+// v0.8.0 — PHASE 3: drift-aware walker. A third verdict, 'drift', re-grounds the
+// upcoming beats to follow the story (guarded by patience + cooldown + a "reshape
+// the route, never outcomes or psychology" fence). Off = pure scripted walker.
+// (0.6 context-aware generation · 0.7 tabbed UI · 0.7.1 mobile clamp)
+//
 // v0.5.0 — PHASE 2b: + AI ladder GENERATOR (premise -> ladder via the walker's
 // connection) and two more templates (Story Circle, Kishotenketsu). Fills an idle
 // chat for ANY story in seconds.
@@ -60,7 +65,7 @@ const EXT_ID = 'chronicler';
 const TAG = '[Chronicler]';
 const INJECT_KEY = 'CHRONICLER';
 const Z = 31000;
-const VERSION = '0.7.1';
+const VERSION = '0.8.0';
 
 // ─────────────────────────────────────────────────────────────────
 // Default ladder — demo zombie escalation. Each rung is the World-Forge
@@ -220,6 +225,11 @@ const DEFAULT_SETTINGS = {
     evidenceWindow: 6,           // how many recent messages the judge reads
     delayMs: 1200,               // wait after the message settles before judging
 
+    // ── Drift-aware re-grounding (Phase 3) ──
+    driftEnabled: true,          // off = pure scripted walker (advance/hold only)
+    driftPatience: 2,            // consecutive 'drift' verdicts before re-grounding (tolerates tangents)
+    reGroundCooldown: 6,         // min messages between re-grounds (re-grounding is rare by design)
+
     fabPos: null,
 };
 
@@ -246,6 +256,8 @@ function chatState() {
     cs.pointer = clampPointer(cs.pointer, cs.ladder.length || 1);
     if (cs.mode !== 'world' && cs.mode !== 'character' && cs.mode !== 'off') cs.mode = 'world';
     if (!cs._walker || typeof cs._walker !== 'object') cs._walker = { lastEvalAt: -999, last: null };
+    if (typeof cs._walker.driftStreak !== 'number') cs._walker.driftStreak = 0;
+    if (typeof cs._walker.lastRegroundAt !== 'number') cs._walker.lastRegroundAt = -999;
     return cs;
 }
 function saveChatState() { doSaveChat(); }
@@ -494,19 +506,22 @@ function buildEvidence(n) {
 
 function buildWalkerPrompt(rung, evidence) {
     return [
-        "You are the progression walker for a story's world-phase ladder. You are a judge, not a narrator — do not address the reader or continue the story.",
+        "You are the progression walker for a story's beat ladder. You are a judge, not a narrator — do not address the reader or continue the story.",
         '',
-        'The story is currently at this phase:',
-        `  Phase: ${rung.title}`,
+        'The story is currently at this beat:',
+        `  Beat: ${rung.title}`,
         rung.situation ? `  Situation: ${rung.situation}` : '',
         '',
-        'This phase advances to the next ONLY when its exit condition is met:',
+        'This beat advances when its exit condition is met:',
         `  Exit condition: ${rung.exit}`,
         '',
-        'Read the recent chat and decide whether the exit condition has ACTUALLY been met on-screen.',
-        'Mark "advance" ONLY when the recent messages give direct evidentiary support that the exit condition is fulfilled. If the evidence is ambiguous, partial, anticipated-but-not-yet-happened, or merely thematically near, decide "hold". Do NOT infer from foreshadowing, mood, relevance, or what will probably happen next.',
-        'Return ONLY valid JSON, no preamble and no markdown fences, with exactly these keys:',
-        '{ "decision": "hold" | "advance", "confidence": 0.0, "reason": "one short sentence; quote the moment if advancing" }',
+        'Read the recent chat and return EXACTLY ONE decision:',
+        '- "advance": the exit condition has ACTUALLY been met on-screen — direct evidence, not foreshadowing, mood, or what will probably happen next.',
+        '- "hold": the story is still within this beat; the exit is not met yet, but the beat still describes what is happening. This is the DEFAULT — prefer it whenever in doubt.',
+        '- "drift": the story has clearly moved somewhere this beat no longer describes and is heading away from this exit, so insisting on the beat would railroad. Use this ONLY for a genuine, sustained change of direction — NEVER for a brief tangent, a quiet lull, or a scene that simply has not reached the exit yet.',
+        '',
+        'Return ONLY valid JSON, no preamble and no markdown fences:',
+        '{ "decision": "advance" | "hold" | "drift", "confidence": 0.0, "reason": "one short sentence" }',
         '',
         'Recent chat:',
         evidence,
@@ -648,6 +663,76 @@ async function generateLadder(premise, count) {
 }
 
 // force=true bypasses the cooldown (used by the "Check now" button / slash).
+// Re-ground: the story has drifted. Rewrite ONLY the beats from the pointer
+// onward to fit what's actually happening, keeping passed beats as fixed history
+// and bending the new tail toward the arc's original destination. Reshapes the
+// ROUTE, never outcomes or psychology. Reuses the generator's transport.
+async function reGround(idx, driftReason) {
+    const cs = chatState();
+    const p = cs.pointer;
+    const passed = cs.ladder.slice(0, p);          // fixed history
+    const remaining = cs.ladder.slice(p);          // current + upcoming → rewritten
+    const k = Math.max(2, remaining.length);
+    const evidence = buildEvidence(Math.max(6, settings().evidenceWindow));
+    const passedTxt = passed.length ? passed.map((r, i) => `${i + 1}. ${r.title}`).join('\n') : '(none — still early in the arc)';
+    const intendedTxt = remaining.map((r, i) => `${i + 1}. ${r.title}${r.exit ? ` — exit: ${r.exit}` : ' — (final)'}`).join('\n');
+
+    const prompt = [
+        'You are re-routing a story beat ladder that has DRIFTED. You reshape the upcoming ROUTE only — you do NOT write what happens, and you do NOT decide any character\'s actions, choices, or feelings.',
+        `Why we are re-grounding: ${driftReason || 'the story moved away from the planned beat.'}`,
+        '',
+        'Beats already passed (FIXED history — do not rewrite or contradict):',
+        passedTxt,
+        '',
+        'Where the arc was heading (INTENT — preserve the destination and spirit where it still fits; bend it, do not discard it):',
+        intendedTxt,
+        '',
+        'What is ACTUALLY happening now (re-anchor to this):',
+        evidence,
+        '',
+        `Rewrite ONLY the upcoming beats so they fit what is actually happening now while still aiming toward the arc's original destination. Produce ${k} beats, COARSE / arc-level (each spans multiple scenes). The FINAL beat must have "exit": "".`,
+        'Output ONLY a JSON array of beats — no preamble, no markdown fences. Each: { "title", "genre", "situation", "mandate": ["…"], "exit" }.',
+    ].join('\n');
+
+    let raw;
+    try { raw = await callUtility(prompt, 4000); }
+    catch (e) { console.warn(TAG, 'reground call failed', e); return false; }
+    let txt = String(raw == null ? '' : raw).replace(/```json|```/g, '').trim();
+    const m = txt.match(/\[[\s\S]*\]/);
+    if (m) txt = m[0];
+    let arr;
+    try { arr = JSON.parse(txt); } catch { console.warn(TAG, 'reground parse fail'); return false; }
+    if (!Array.isArray(arr) || !arr.length) return false;
+
+    const tail = [];
+    for (const r of arr) {
+        if (!r || typeof r !== 'object') continue;
+        const title = String(r.title || '').trim();
+        if (!title) continue;
+        tail.push({
+            title,
+            genre: String(r.genre || '').trim(),
+            era: String(r.era || title).trim(),
+            situation: String(r.situation || '').trim(),
+            mandate: Array.isArray(r.mandate) ? r.mandate.map(x => String(x).trim()).filter(Boolean) : (r.mandate ? [String(r.mandate)] : []),
+            exit: String(r.exit || '').trim(),
+        });
+    }
+    if (!tail.length) return false;
+    tail[tail.length - 1].exit = '';               // enforce terminal on the last beat
+
+    cs.ladder = passed.concat(tail);
+    cs.pointer = Math.min(p, cs.ladder.length - 1); // stay on the (now rewritten) current beat
+    cs._walker.driftStreak = 0;
+    cs._walker.lastRegroundAt = idx;
+    cs._walker.last = 'reground';
+    saveChatState();
+    applyInjection();
+    refreshPanel();
+    try { toastr.info('The arc bent to follow the story (re-grounded).', '📖 Chronicler', { timeOut: 6000 }); } catch (_) { /* */ }
+    return true;
+}
+
 async function runWalker(mesId, force = false) {
     const s = settings();
     if (!s.enabled || !s.walkerEnabled) return;
@@ -682,19 +767,39 @@ async function runWalker(mesId, force = false) {
         saveChatState();
         refreshPanel();
 
-        if (!d) return;                                        // gate 1: clean parse
-        if (d.decision !== 'advance') return;
-        if ((d.confidence || 0) < s.minConfidence) return;     // gate 2: confidence
-        // gate 3: cooldown was already applied above
+        if (!d) return;                                        // gate: clean parse
+        const conf = d.confidence || 0;
 
-        const before = rung.title;
-        const moved = step(+1, { silent: true });
-        if (moved) {
-            try {
-                toastr.success(`Walker advanced: ${before} → ${moved.title}\n${d.reason || ''}`,
-                    '📖 Chronicler', { timeOut: 7000 });
-            } catch (_) { /* */ }
+        // ADVANCE — exit met
+        if (d.decision === 'advance' && conf >= s.minConfidence) {
+            cs._walker.driftStreak = 0;
+            saveChatState();
+            const before = rung.title;
+            const moved = step(+1, { silent: true });
+            if (moved) {
+                try {
+                    toastr.success(`Walker advanced: ${before} → ${moved.title}\n${d.reason || ''}`,
+                        '📖 Chronicler', { timeOut: 7000 });
+                } catch (_) { /* */ }
+            }
+            return;
         }
+
+        // DRIFT — story moved off the beat; re-ground only on sustained, confident drift
+        if (d.decision === 'drift' && conf >= s.minConfidence) {
+            cs._walker.driftStreak = (cs._walker.driftStreak || 0) + 1;
+            saveChatState();
+            refreshPanel();
+            const patient = cs._walker.driftStreak >= (s.driftPatience | 0 || 2);
+            const cooled = (idx - (cs._walker.lastRegroundAt ?? -999)) >= (s.reGroundCooldown | 0);
+            if (s.driftEnabled && patient && cooled) {
+                await reGround(idx, d.reason || '');
+            }
+            return;
+        }
+
+        // HOLD (or any low-confidence verdict) — stay; a non-drift verdict relaxes the streak
+        if (d.decision !== 'drift') { cs._walker.driftStreak = 0; saveChatState(); }
     } catch (e) {
         cs._walker.last = 'error';
         console.warn(TAG, 'walker failed:', e);
@@ -949,6 +1054,10 @@ function panelHtml() {
         <div style="${ROW}"><span>Token budget</span><input type="number" id="chron-walk-budget" value="${s.tokenBudget}" min="256" step="256" style="${NUM}"></div>
         <div style="${ROW}"><span>Min confidence</span><input type="number" id="chron-walk-conf" value="${s.minConfidence}" min="0" max="1" step="0.05" style="${NUM}"></div>
         <div style="${ROW}"><span>Cooldown (msgs)</span><input type="number" id="chron-walk-cd" value="${s.cooldownMessages}" min="0" step="1" style="${NUM}"></div>
+        <div style="border-top:1px dashed rgba(150,170,210,0.2);margin-top:8px;padding-top:6px;"></div>
+        <div style="${ROW}"><span>Drift-aware</span><input type="checkbox" id="chron-drift-en" ${s.driftEnabled ? 'checked' : ''}></div>
+        <div style="${ROW}"><span>Drift patience</span><input type="number" id="chron-drift-pat" value="${s.driftPatience}" min="1" max="6" step="1" style="${NUM}"></div>
+        <div style="opacity:0.5;font-size:10px;margin-top:2px;">When the story drifts off-beat for ${s.driftPatience} checks in a row, the arc re-routes its upcoming beats to follow — instead of railroading or stalling. Off = pure scripted advance/hold.</div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
             <button id="chron-walk-check" style="${BTN}flex:1;">Check now</button>
             <span style="font-size:11px;opacity:0.6;">last: ${last}</span>
@@ -1013,6 +1122,8 @@ function bindPanelEvents() {
     $('#chron-walk-budget').on('change', function () { const v = parseInt($(this).val(), 10); settings().tokenBudget = isNaN(v) ? 2000 : Math.max(256, v); saveSettings(); });
     $('#chron-walk-conf').on('change', function () { let v = parseFloat($(this).val()); if (isNaN(v)) v = 0.6; settings().minConfidence = Math.max(0, Math.min(1, v)); saveSettings(); });
     $('#chron-walk-cd').on('change', function () { const v = parseInt($(this).val(), 10); settings().cooldownMessages = isNaN(v) ? 3 : Math.max(0, v); saveSettings(); });
+    $('#chron-drift-en').on('change', function () { settings().driftEnabled = $(this).prop('checked'); saveSettings(); });
+    $('#chron-drift-pat').on('change', function () { const v = parseInt($(this).val(), 10); settings().driftPatience = isNaN(v) ? 2 : Math.max(1, Math.min(6, v)); saveSettings(); refreshPanel(); });
     $('#chron-walk-check').on('click', function () {
         try { toastr.info('Checking the exit trigger…', '📖 Chronicler', { timeOut: 2500 }); } catch (_) { /* */ }
         runWalker(-1, true);
@@ -1257,6 +1368,7 @@ function cmdDebug() {
         `output: ${ladderEmpty() ? 'none' : (cs.mode === 'world' ? 'injecting mandate' : cs.mode === 'character' ? 'driving Codex era (getActiveEra)' : 'paused')}`,
         ladderEmpty() ? '' : `exit watched: ${r && r.exit ? '“' + r.exit.slice(0, 55) + (r.exit.length > 55 ? '…' : '') + '”' : '(terminal — idle)'}`,
         `walker last: ${cs._walker?.last || '—'} | in-flight: ${walkerInFlight}`,
+        `drift: ${s.driftEnabled ? 'on' : 'off'} | streak: ${cs._walker?.driftStreak || 0}/${s.driftPatience} | last reground @${cs._walker?.lastRegroundAt ?? '—'}`,
         `profile: ${s.walkerProfile} → ${profId ? 'resolved ✓' : '❌ unresolved'}`,
         `transport: ${ctx().ConnectionManagerRequestService ? 'ConnectionManagerRequestService ✓' : '❌ unavailable'}`,
         `budget: ${s.tokenBudget} | minConf: ${s.minConfidence} | cooldown: ${s.cooldownMessages}`,
