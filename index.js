@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════════
 // CHRONICLER — the "direct" verb of the suite
+// v0.5.0 — PHASE 2b: + AI ladder GENERATOR (premise -> ladder via the walker's
+// connection) and two more templates (Story Circle, Kishotenketsu). Fills an idle
+// chat for ANY story in seconds.
+//
 // v0.4.0 — PHASE 2a+2c: + genre TEMPLATES (Horror / Romance / Hero's Journey)
 // and a save/load LIBRARY scoped per-character or global. Empty chats fill in
 // seconds from a template instead of being authored from scratch.
@@ -56,7 +60,7 @@ const EXT_ID = 'chronicler';
 const TAG = '[Chronicler]';
 const INJECT_KEY = 'CHRONICLER';
 const Z = 31000;
-const VERSION = '0.4.0';
+const VERSION = '0.5.1';
 
 // ─────────────────────────────────────────────────────────────────
 // Default ladder — demo zombie escalation. Each rung is the World-Forge
@@ -173,6 +177,28 @@ const TEMPLATES = {
             { title: 'Seizing the Sword', genre: 'hard-won', situation: 'The reward; transformation through the ordeal.', mandate: ['Let the victory cost something.', 'Let it change the hero.'], exit: 'A final push or pursuit drives toward the climax.' },
             { title: 'The Final Push', genre: 'climactic', situation: 'The road back; a last confrontation or sprint.', mandate: ['Pay off the arc.', 'Let the changed hero act decisively.'], exit: 'The conflict resolves and the hero turns toward home.' },
             { title: 'Return with the Elixir', genre: 'resolution', situation: 'Resolution; a new normal carrying what was won.', mandate: ['Show the transformed status quo.', 'Pay off the ordinary world.'], exit: '' },
+        ],
+    },
+
+    storycircle: {
+        name: 'Story Circle (Dan Harmon)', mode: 'world', ladder: [
+            { title: 'Comfort Zone', genre: 'grounded order', situation: 'The character in their familiar world, in balance.', mandate: ['Establish the routine and what feels safe.', 'Hint at the small lack beneath the order.'], exit: 'A want or need surfaces that the comfort zone cannot satisfy.' },
+            { title: 'The Need', genre: 'restless', situation: 'A desire or lack sharpens; the status quo no longer fits.', mandate: ['Make the want concrete.', 'Let dissatisfaction build pressure.'], exit: 'The character steps into an unfamiliar situation to pursue it.' },
+            { title: 'The Descent', genre: 'unfamiliar', situation: 'They cross into unfamiliar territory; new rules apply.', mandate: ['Disorient gently — the ground is new.', 'Raise the stakes of being out of place.'], exit: 'They begin adapting, searching, and struggling in the new world.' },
+            { title: 'The Search', genre: 'trial and adaptation', situation: 'Adaptation through trials; they learn the new world.', mandate: ['Test them; let them change to cope.', 'Build toward what they came for.'], exit: 'They get what they were looking for.' },
+            { title: 'The Find', genre: 'apparent victory', situation: 'They find or seize the thing they wanted.', mandate: ['Let the victory feel real.', 'Plant the cost it will demand.'], exit: 'Holding it turns out to demand a heavy price.' },
+            { title: 'The Price', genre: 'hard cost', situation: 'They pay dearly for what they took.', mandate: ['Make the cost land and sting.', 'Strip away the easy version of success.'], exit: 'They turn back toward the familiar world, marked by the cost.' },
+            { title: 'The Return', genre: 'changed homecoming', situation: 'They come back to where they started — but altered.', mandate: ['Mirror the opening, now off-key.', 'Show what the journey took and gave.'], exit: 'The change becomes visible and settles into a new normal.' },
+            { title: 'Changed', genre: 'new equilibrium', situation: 'A new normal, carrying what was learned.', mandate: ['Pay off the opening lack.', 'Let the transformation rest.'], exit: '' },
+        ],
+    },
+
+    kishotenketsu: {
+        name: 'Kishōtenketsu (no-conflict 4-act)', mode: 'world', ladder: [
+            { title: 'Ki — Introduction', genre: 'gentle establishment', situation: 'Characters, place, and mood are established. No conflict required.', mandate: ['Let the scene simply be; observe, do not pressure.', 'Trust mood and detail over tension.'], exit: 'The situation is established and begins to develop or deepen.' },
+            { title: 'Shō — Development', genre: 'quiet deepening', situation: 'The established situation develops; texture accumulates.', mandate: ['Deepen without manufacturing conflict.', 'Follow curiosity and small change.'], exit: 'An unexpected element, shift, or new angle enters that recontextualizes things.' },
+            { title: 'Ten — The Turn', genre: 'recontextualizing turn', situation: 'A surprising, often oblique element arrives — a turn, not a clash.', mandate: ['Introduce the unexpected; do NOT force it into conflict.', 'Let it reframe what came before.'], exit: 'The turn and the earlier strands begin to relate and resolve.' },
+            { title: 'Ketsu — Reconciliation', genre: 'harmonized close', situation: 'The pieces harmonize; a new understanding settles.', mandate: ['Integrate the turn with the whole.', 'Close on resonance, not victory.'], exit: '' },
         ],
     },
 };
@@ -502,7 +528,7 @@ function parseDecision(raw) {
     }
 }
 
-async function callUtility(prompt) {
+async function callUtility(prompt, maxTokens) {
     const c = ctx();
     if (!c.ConnectionManagerRequestService) throw new Error('ConnectionManagerRequestService unavailable');
     const profileId = resolveProfileId(settings().walkerProfile);
@@ -510,11 +536,49 @@ async function callUtility(prompt) {
     const res = await c.ConnectionManagerRequestService.sendRequest(
         profileId,
         [{ role: 'user', content: prompt }],
-        settings().tokenBudget || 2000,
+        maxTokens || settings().tokenBudget || 2000,
         { extractData: true, includePreset: true, includeInstruct: false },
         {},
     );
     return (res && typeof res === 'object' && 'content' in res) ? res.content : res;
+}
+
+// ── Generator (2b): premise → ladder, via the walker's connection ──
+function buildGenPrompt(premise, n) {
+    return [
+        'You are a story-structure author. Build a beat ladder (a plot / world spine) for the premise below.',
+        '',
+        'Output ONLY a JSON array of beats — no preamble, no commentary, no markdown fences. Each beat is an object:',
+        '{ "title": "short beat name", "genre": "tonal register for this beat", "situation": "one sentence: what is true in the world at this beat", "mandate": ["2-3 imperative directives for writing this beat"], "exit": "the observable on-screen condition that, once met, advances the story to the next beat" }',
+        '',
+        `Produce ${n} beats in dramatic order. The FINAL beat must have "exit": "" (terminal).`,
+        'Keep the beats COARSE — arc-level turning points (think an 8-beat Story Circle), where each beat spans MULTIPLE scenes of play. Do NOT write a fine, scene-by-scene shot list: too many small beats turn every rung into a lock and strangle pacing. Fewer, bigger beats are better.',
+        'Exits must be judgeable from what happens on-screen — concrete events, not vague mood. Mandates are imperative ("Keep the dread close," never "it is dreadful").',
+        '',
+        'Premise:',
+        premise,
+    ].join('\n');
+}
+
+async function generateLadder(premise, count) {
+    const c = ctx();
+    if (!c.ConnectionManagerRequestService) return { ok: false, error: 'No background connection available (set a profile in the Walker section).' };
+    if (!resolveProfileId(settings().walkerProfile)) return { ok: false, error: 'No connection profile resolved — set one in the Walker section.' };
+    const n = Math.max(4, Math.min(12, (count | 0) || 8)); // coarse: arc-level beats, capped low
+    let raw;
+    try { raw = await callUtility(buildGenPrompt(String(premise || '').trim(), n), 4000); }
+    catch (e) { return { ok: false, error: e?.message || String(e) }; }
+    let txt = String(raw == null ? '' : raw).replace(/```json|```/g, '').trim();
+    const m = txt.match(/\[[\s\S]*\]/);
+    if (m) txt = m[0];
+    const res = loadLadder(txt);
+    if (!res.ok) return { ok: false, error: 'Generated text was not a usable ladder. ' + res.error };
+    const cs = chatState();
+    cs.mode = 'world';            // generated spines are world-tone by default
+    saveChatState();
+    applyInjection();
+    refreshPanel();
+    return { ok: true };
 }
 
 // force=true bypasses the cooldown (used by the "Check now" button / slash).
@@ -737,6 +801,20 @@ function panelHtml() {
             <div id="chron-lib-msg" style="font-size:11px;opacity:0.75;margin-top:5px;"></div>
         </div>`;
 
+    const genSection = `
+        <div style="border-top:1px solid rgba(150,170,210,0.2);margin-top:6px;padding-top:6px;">
+            <div id="chron-gen-toggle" style="cursor:pointer;opacity:0.85;font-size:12px;">${empty ? '✨ Generate a ladder' : '▸ ✨ Generate a ladder'}</div>
+            <div id="chron-gen-box" style="margin-top:6px;${empty ? '' : 'display:none;'}">
+                <textarea id="chron-gen-premise" style="${TA}min-height:58px;" placeholder="premise / genre / what this story is about…"></textarea>
+                <div style="display:flex;gap:6px;align-items:center;margin-top:5px;">
+                    <span style="font-size:11px;opacity:0.7;">beats</span>
+                    <input type="number" id="chron-gen-count" value="8" min="4" max="12" step="1" style="${NUM}width:56px;">
+                    <button id="chron-gen-btn" style="${BTN}flex:1;">Generate</button>
+                </div>
+                <div id="chron-gen-msg" style="font-size:11px;opacity:0.75;margin-top:5px;">Uses the Walker's connection profile.</div>
+            </div>
+        </div>`;
+
     const idleBlock = `
         <div style="border-top:1px solid rgba(150,170,210,0.2);margin:6px 0;padding-top:10px;text-align:center;">
             <div style="opacity:0.8;font-size:12px;">No ladder loaded — this chat is idle.</div>
@@ -827,6 +905,7 @@ function panelHtml() {
         ${modeRow}
         ${empty ? idleBlock : loadedBlock}
         ${libSection}
+        ${genSection}
         ${loadSection}
         ${footer}
     </div>`;
@@ -924,6 +1003,34 @@ function bindPanelEvents() {
         if (msg) {
             msg.textContent = res.ok ? `✓ Saved “${res.entry.name}” (${res.entry.scope === 'character' ? 'this character' : 'global'}).` : '✗ ' + res.error;
             msg.style.color = res.ok ? '#9fd6a0' : '#e6a0a0';
+        }
+    });
+
+    // Generator (2b)
+    $('#chron-gen-toggle').on('click', function () {
+        const box = document.getElementById('chron-gen-box');
+        if (!box) return;
+        box.style.display = (box.style.display === 'none') ? 'block' : 'none';
+    });
+    $('#chron-gen-btn').on('click', async function () {
+        const premise = String($('#chron-gen-premise').val() || '').trim();
+        const count = parseInt($('#chron-gen-count').val(), 10) || 8;
+        const msg = document.getElementById('chron-gen-msg');
+        if (!premise) { if (msg) { msg.textContent = 'Give it a premise first.'; msg.style.color = '#e6a0a0'; } return; }
+        if (msg) { msg.textContent = 'Generating…'; msg.style.color = '#ccd4e6'; }
+        const btn = this; btn.disabled = true; btn.textContent = '…';
+        try {
+            const res = await generateLadder(premise, count);
+            const m2 = document.getElementById('chron-gen-msg'); // panel may have rebuilt on success
+            if (m2) {
+                m2.textContent = res.ok ? '✓ Generated and loaded (World mode).' : '✗ ' + res.error;
+                m2.style.color = res.ok ? '#9fd6a0' : '#e6a0a0';
+            } else if (!res.ok) {
+                try { toastr.warning(res.error, '📖 Chronicler'); } catch (_) { /* */ }
+            }
+        } finally {
+            const b = document.getElementById('chron-gen-btn');
+            if (b) { b.disabled = false; b.textContent = 'Generate'; }
         }
     });
 }
@@ -1030,6 +1137,7 @@ function registerAPI() {
         listTemplates: () => Object.keys(TEMPLATES).map(k => ({ key: k, name: TEMPLATES[k].name })),
         loadTemplate: (k) => loadTemplate(k),
         saveLadder: (name, scope) => saveCurrent(name, scope),
+        generate: (premise, count) => generateLadder(premise, count),
         version: VERSION,
     };
     console.log(`${TAG} Public API registered → window.ChroniclerAPI`);
